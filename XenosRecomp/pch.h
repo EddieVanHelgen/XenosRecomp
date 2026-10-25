@@ -7,6 +7,9 @@
 #include <dxcapi.h>
 
 #include <bit>
+#include <cstdio>
+#include <cstring>
+#include <vector>
 #include <cassert>
 #include <cstdint>
 #include <execution>

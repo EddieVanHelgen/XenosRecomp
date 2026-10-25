@@ -29,8 +29,13 @@ struct RecompiledShader
     uint32_t specConstantsMask = 0;
 };
 
+int pdzMain(int argc, char** argv);
+
 int main(int argc, char** argv)
 {
+    if (argc >= 2 && strncmp(argv[1], "--pdz", 5) == 0)
+        return pdzMain(argc, argv);
+
 #ifndef XENOS_RECOMP_INPUT
     if (argc < 4)
     {

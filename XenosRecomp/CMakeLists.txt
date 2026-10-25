@@ -12,6 +12,8 @@ add_executable(XenosRecomp
     dxc_compiler.h
     main.cpp
     pch.h
+    pdz_main.cpp
+    shader_pdz.h
     shader.h
     shader_code.h
     shader_recompiler.cpp
