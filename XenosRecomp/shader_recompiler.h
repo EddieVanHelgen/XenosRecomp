@@ -125,6 +125,7 @@ struct ShaderRecompiler : StringBuffer
     void recompilePdzVertexFetch(const VertexFetchInstruction& instr, uint32_t address);
     void recompilePdzTextureFetch(const TextureFetchInstruction& instr);
     uint32_t pdzSamplerVariant(const TextureFetchInstruction& instr);
+    static uint32_t pdzSamplerCode(const PdzSamplerVariant& v);
     std::string pdzConstantRef(uint32_t reg, bool relative, bool useA0);
     void pdzBuildJson(const pdz::Shader& shader);
 };

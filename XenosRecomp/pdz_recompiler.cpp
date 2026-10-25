@@ -345,6 +345,15 @@ void ShaderRecompiler::recompilePdzTextureFetch(const TextureFetchInstruction& i
     }
 }
 
+// Packed override code (sidecar "code" and the HLSL comment): mag 1:0, min 3:2, mip 5:4 (0 point, 1 linear,
+// 2 base map, 3 = use the fetch constant), aniso 8:6 (7 = fetch constant), volMag 10:9, volMin 12:11.
+// 0x1FFF = no override at all.
+uint32_t ShaderRecompiler::pdzSamplerCode(const PdzSamplerVariant& v)
+{
+    return (v.magFilter & 3) | ((v.minFilter & 3) << 2) | ((v.mipFilter & 3) << 4) | ((v.anisoFilter & 7) << 6) |
+        ((v.volMagFilter & 3) << 9) | ((v.volMinFilter & 3) << 11);
+}
+
 uint32_t ShaderRecompiler::pdzSamplerVariant(const TextureFetchInstruction& instr)
 {
     PdzSamplerVariant v{};
@@ -727,6 +736,9 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
     }
     out += '\n';
 
+    // Sampler variants are only known after pass 2, so the table is inserted at the end (see below).
+    const size_t samplerTablePos = out.size();
+
     out += "[shader(\"";
     out += isPixelShader ? "pixel" : "vertex";
     out += "\")]\n";
@@ -1079,6 +1091,22 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
 
     out += "}\n";
 
+    {
+        // g_Samplers[k] = fetch constant slot + per-instruction overrides (point/linear/basemap, or the fetch
+        // constant's own value); the renderer resolves each entry to a D3D12 sampler when it binds the shader.
+        static const char* const FILTERS[] = { "point", "linear", "basemap", "fetch" };
+        static const char* const ANISO[] = { "off", "1x", "2x", "4x", "8x", "16x", "?", "fetch" };
+        std::string table;
+        for (size_t i = 0; i < pdz.samplerVariants.size(); i++)
+        {
+            auto& v = pdz.samplerVariants[i];
+            table += fmt::format("// sampler {}: slot {} mag={} min={} mip={} aniso={} volMag={} volMin={} code=0x{:04x}\n", i, v.slot,
+                FILTERS[v.magFilter & 3], FILTERS[v.minFilter & 3], FILTERS[v.mipFilter & 3], ANISO[v.anisoFilter & 7],
+                FILTERS[v.volMagFilter & 3], FILTERS[v.volMinFilter & 3], pdzSamplerCode(v));
+        }
+        out.insert(samplerTablePos, table);
+    }
+
     if (!pdz.simpleControlFlow && pdz.usesLoopInSwitch)
     {
         // declare the loop counter used by the switch model
@@ -1200,9 +1228,12 @@ void ShaderRecompiler::pdzBuildJson(const pdz::Shader& shader)
     for (size_t i = 0; i < pdz.samplerVariants.size(); i++)
     {
         auto& v = pdz.samplerVariants[i];
-        j += fmt::format("    {{\"index\": {}, \"slot\": {}, \"dimension\": \"{}\", \"mag\": \"{}\", \"min\": \"{}\", \"mip\": \"{}\", \"aniso\": \"{}\", \"vol_mag\": \"{}\", \"vol_min\": \"{}\"}}{}\n",
+        const bool overrides = (v.magFilter & 3) != 3 || (v.minFilter & 3) != 3 || (v.mipFilter & 3) != 3 || (v.anisoFilter & 7) != 7 ||
+            (v.volMagFilter & 3) != 3 || (v.volMinFilter & 3) != 3;
+        j += fmt::format("    {{\"index\": {}, \"slot\": {}, \"dimension\": \"{}\", \"mag\": \"{}\", \"min\": \"{}\", \"mip\": \"{}\", \"aniso\": \"{}\", \"vol_mag\": \"{}\", \"vol_min\": \"{}\", \"overrides\": {}, \"code\": {}}}{}\n",
             i, v.slot, DIMENSION_NAMES[v.dimension & 3], FILTER_NAMES[v.magFilter & 3], FILTER_NAMES[v.minFilter & 3], FILTER_NAMES[v.mipFilter & 3],
-            ANISO_NAMES[v.anisoFilter & 7], FILTER_NAMES[v.volMagFilter & 3], FILTER_NAMES[v.volMinFilter & 3], i + 1 < pdz.samplerVariants.size() ? "," : "");
+            ANISO_NAMES[v.anisoFilter & 7], FILTER_NAMES[v.volMagFilter & 3], FILTER_NAMES[v.volMinFilter & 3], overrides ? "true" : "false",
+            pdzSamplerCode(v), i + 1 < pdz.samplerVariants.size() ? "," : "");
     }
     j += "  ],\n";
     j += fmt::format("  \"uses_register_lod\": {},\n", pdz.usesRegisterLod ? "true" : "false");
