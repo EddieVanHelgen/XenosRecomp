@@ -21,6 +21,13 @@ struct PdzSamplerVariant
     uint32_t slot, magFilter, minFilter, mipFilter, anisoFilter, volMagFilter, volMinFilter, dimension;
 };
 
+struct PdzLoopSite
+{
+    uint32_t constant;
+    bool repeat;
+    bool predicatedBreak;
+};
+
 struct PdzState
 {
     bool simpleControlFlow = true;
@@ -46,6 +53,7 @@ struct PdzState
     std::vector<PdzVertexInput> vertexInputs;
     std::unordered_map<uint32_t, uint32_t> vertexInputsByAddress;
     std::vector<PdzSamplerVariant> samplerVariants;
+    std::vector<PdzLoopSite> loopSites;
     std::vector<std::string> unsupported;
 };
 

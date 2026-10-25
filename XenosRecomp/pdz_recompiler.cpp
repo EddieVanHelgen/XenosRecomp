@@ -882,7 +882,14 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
 
             case ControlFlowOpcode::LoopStart:
             {
+                // Hardware semantics (SDK dxbc_translator.cpp ProcessLoopStart/EndInstruction): the loop
+                // constant holds count (7:0), aL start (15:8) and a signed step (23:16); a zero count skips
+                // the loop; aL is set to start unless the loop is a "repeat" (keeps the current aL); at
+                // endloop the count is decremented first, then the loop exits when it reaches zero (or on
+                // the predicated break), otherwise aL += step and the body runs again.  Each nesting level
+                // (up to 4) saves and restores the outer aL.
                 const uint32_t id = cf.loopStart.loopId;
+                pdz.loopSites.push_back({ id, cf.loopStart.isRepeat != 0, false });
                 if (pdz.simpleControlFlow)
                 {
                     indent();
@@ -899,10 +906,12 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
                 }
                 else
                 {
-                    println("\t\t\tloopCount0 = loopCount(loopConst({}u));", id);
+                    println("\t\t\tif (loopCount(loopConst({}u)) == 0u) {{ pc = {}; continue; }}", id, uint32_t(cf.loopStart.address));
+                    println("\t\t\tloopCounts[loopLevel] = loopCount(loopConst({}u));", id);
+                    out += "\t\t\taLStack[loopLevel] = aL;\n";
+                    out += "\t\t\tloopLevel = (loopLevel + 1u) & 3u;\n";
                     if (!cf.loopStart.isRepeat)
                         println("\t\t\taL = loopStart(loopConst({}u));", id);
-                    println("\t\t\tif (loopCount0 == 0u) {{ pc = {}; continue; }}", uint32_t(cf.loopStart.address));
                     pdz.usesLoopInSwitch = true;
                 }
                 break;
@@ -935,15 +944,19 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
                 else
                 {
                     if (cf.loopEnd.isPredicatedBreak)
-                        println("\t\t\tif (--loopCount0 != 0u && !({}p0))", cf.loopEnd.condition ? "" : "!");
+                        println("\t\t\tif (--loopCounts[(loopLevel - 1u) & 3u] != 0u && !({}p0))", cf.loopEnd.condition ? "" : "!");
                     else
-                        out += "\t\t\tif (--loopCount0 != 0u)\n";
+                        out += "\t\t\tif (--loopCounts[(loopLevel - 1u) & 3u] != 0u)\n";
                     out += "\t\t\t{\n";
                     println("\t\t\t\taL += loopStep(loopConst({}u));", id);
                     println("\t\t\t\tpc = {};", uint32_t(cf.loopEnd.address));
                     out += "\t\t\t\tcontinue;\n";
                     out += "\t\t\t}\n";
+                    out += "\t\t\tloopLevel = (loopLevel - 1u) & 3u;\n";
+                    out += "\t\t\taL = aLStack[loopLevel];\n";
                 }
+                if (!pdz.loopSites.empty())
+                    pdz.loopSites.back().predicatedBreak = cf.loopEnd.isPredicatedBreak != 0;
                 break;
             }
 
@@ -1071,7 +1084,7 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
         // declare the loop counter used by the switch model
         size_t pos = out.find("\tuint pc = 0;\n");
         if (pos != std::string::npos)
-            out.insert(pos, "\tuint loopCount0 = 0u;\n");
+            out.insert(pos, "\tuint loopCounts[4] = { 0u, 0u, 0u, 0u };\n\tint aLStack[4] = { 0, 0, 0, 0 };\n\tuint loopLevel = 0u;\n");
     }
 
     pdzBuildJson(shader);
@@ -1105,6 +1118,11 @@ void ShaderRecompiler::pdzBuildJson(const pdz::Shader& shader)
     j += fmt::format("  \"writes_a0\": {},\n", pdz.writesA0 ? "true" : "false");
     j += fmt::format("  \"bool_constants_used\": {},\n", listU(pdz.boolConstantsUsed));
     j += fmt::format("  \"loop_constants_used\": {},\n", listU(pdz.loopConstantsUsed));
+    j += "  \"loops\": [";
+    for (size_t i = 0; i < pdz.loopSites.size(); i++)
+        j += fmt::format("{}{{\"constant\": {}, \"repeat\": {}, \"predicated_break\": {}}}", i ? ", " : "",
+            pdz.loopSites[i].constant, pdz.loopSites[i].repeat ? "true" : "false", pdz.loopSites[i].predicatedBreak ? "true" : "false");
+    j += "],\n";
 
     j += "  \"literals\": [";
     bool first = true;
