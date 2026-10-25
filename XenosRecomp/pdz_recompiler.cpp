@@ -1203,7 +1203,14 @@ void ShaderRecompiler::pdzBuildJson(const pdz::Shader& shader)
         j += fmt::format("  \"writes_depth\": {},\n", pdz.writesDepth ? "true" : "false");
         j += fmt::format("  \"uses_kill\": {},\n", pdz.usesKill ? "true" : "false");
         if (shader.fromContainer)
+        {
+            // bits 0..3 of the container mask are oC0..oC3 like the exports; 0x20 is set on two shaders and
+            // its meaning is unknown, so only the low four bits are compared
             j += fmt::format("  \"container_output_mask\": \"0x{:x}\",\n", shader.outputMaskRaw);
+            j += fmt::format("  \"container_output_mask_matches\": {},\n", (shader.outputMaskRaw & 0xF) == pdz.colorOutputs ? "true" : "false");
+            if ((shader.outputMaskRaw & 0xF) != pdz.colorOutputs)
+                pdz.unsupported.push_back(fmt::format("container output mask {:#x} differs from the exports {:#x}", shader.outputMaskRaw, pdz.colorOutputs));
+        }
     }
 
     static const char* const DIMENSION_NAMES[] = { "1D", "2D", "3D", "Cube" };

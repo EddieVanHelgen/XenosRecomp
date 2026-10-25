@@ -38,7 +38,7 @@
 //   [4]  SQ_PROGRAM_CNTL-like word (0x821, 0xC21, 0x3C84 ...); not needed
 //   [5]  uninitialised garbage (ASCII fragments)
 //   [6]  PS: interpolator mask, twice (low and high 16 bits, e.g. 0x000F000F); VS: 1
-//   [7]  PS: output mask: bit0 oC0, bit1 oC1 (0x20 seen on two shaders: unknown); VS: vertex element count
+//   [7]  PS: output mask: bit0 oC0, bit1 oC1 (.. bit3 oC3), bit5 = the shader kills pixels; VS: vertex element count
 //   [8]  PS: interpolators start here; VS: export-patch entry count
 //   [9]  VS: 0
 //   [10] VS: 0x290 (constant)
