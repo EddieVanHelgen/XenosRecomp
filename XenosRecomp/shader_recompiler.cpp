@@ -371,6 +371,24 @@ void ShaderRecompiler::recompile(const AluInstruction& instr)
         SCALAR_CONSTANT_1
     };
 
+    // "When three constants are used in one instruction, the second and third constant must either both be
+    // non-relative, or both be relative": the addressing flag for a constant operand is const_0_rel_abs for
+    // the first constant operand of the instruction and const_1_rel_abs for any later one (SDK ucode.h,
+    // src_const_is_addressed).  Operand numbers follow the hardware: 1 = src1, 2 = src2, 3 = src3; the
+    // constant of mulsc/addsc/subsc is operand 3.
+    auto constIsAddressed = [&](uint32_t operandIndex) -> bool
+        {
+            switch (operandIndex)
+            {
+            case 1:
+                return instr.const0Relative;
+            case 2:
+                return instr.src1Select ? instr.const0Relative : instr.const1Relative;
+            default:
+                return (instr.src1Select && instr.src2Select) ? instr.const0Relative : instr.const1Relative;
+            }
+        };
+
     auto op = [&](size_t operand, bool fullVectorMask = false)
         {
             size_t reg = 0;
@@ -443,7 +461,8 @@ void ShaderRecompiler::recompile(const AluInstruction& instr)
             }
             else if (pdzMode)
             {
-                regFormatted = pdzConstantRef(reg, instr.const0Relative, instr.constAddressRegisterRelative);
+                const uint32_t operandIndex = operand == VECTOR_0 ? 1 : (operand == VECTOR_1 ? 2 : 3);
+                regFormatted = pdzConstantRef(reg, constIsAddressed(operandIndex), instr.constAddressRegisterRelative);
             }
             else
             {
