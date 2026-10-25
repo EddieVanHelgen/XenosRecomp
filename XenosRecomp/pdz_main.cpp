@@ -108,6 +108,62 @@ static int pdzDump(const char* path, const char* typeArg)
     return 0;
 }
 
+static int pdzTranslate(const char* input, const char* output, const char* typeArg, const char* includePath,
+    const char* jsonPath, const char* dxilPath, const char* exePath)
+{
+    std::vector<uint8_t> data;
+    pdz::Shader shader;
+    if (!pdzLoadShader(input, typeArg, data, shader))
+        return 1;
+
+    std::string includeFile = includePath != nullptr ? includePath
+        : (std::filesystem::path(exePath).parent_path() / "shader_common_pdz.hlsli").string();
+    std::vector<uint8_t> includeData = pdzReadFile(includeFile.c_str());
+    if (includeData.empty())
+    {
+        fmt::println(stderr, "cannot read the include file {}", includeFile);
+        return 1;
+    }
+    std::string_view include(reinterpret_cast<const char*>(includeData.data()), includeData.size());
+
+    ShaderRecompiler recompiler;
+    recompiler.recompilePdz(shader, include);
+
+    if (!pdzWriteFile(output, recompiler.out.data(), recompiler.out.size()))
+    {
+        fmt::println(stderr, "cannot write {}", output);
+        return 1;
+    }
+    if (jsonPath != nullptr && !pdzWriteFile(jsonPath, recompiler.pdzJson.data(), recompiler.pdzJson.size()))
+    {
+        fmt::println(stderr, "cannot write {}", jsonPath);
+        return 1;
+    }
+
+    int result = 0;
+    if (!recompiler.pdz.unsupported.empty())
+    {
+        std::set<std::string> unique(recompiler.pdz.unsupported.begin(), recompiler.pdz.unsupported.end());
+        for (auto& u : unique)
+            fmt::println(stderr, "{}: unsupported: {}", input, u);
+        result = 3;
+    }
+
+    if (dxilPath != nullptr)
+    {
+        DxcCompiler compiler;
+        IDxcBlob* dxil = compiler.compile(recompiler.out, recompiler.isPixelShader, false, false);
+        if (dxil == nullptr)
+        {
+            fmt::println(stderr, "{}: dxc failed", input);
+            return 4;
+        }
+        pdzWriteFile(dxilPath, dxil->GetBufferPointer(), dxil->GetBufferSize());
+        dxil->Release();
+    }
+    return result;
+}
+
 static void pdzUsage()
 {
     fmt::println("pdz branch usage:");
@@ -160,8 +216,12 @@ int pdzMain(int argc, char** argv)
 
     if (strcmp(command, "--pdz") == 0)
     {
-        fmt::println(stderr, "translation is not implemented yet in this commit");
-        return 2;
+        if (output == nullptr)
+        {
+            pdzUsage();
+            return 1;
+        }
+        return pdzTranslate(input, output, typeArg, includePath, jsonPath, dxilPath, argv[0]);
     }
 
     pdzUsage();

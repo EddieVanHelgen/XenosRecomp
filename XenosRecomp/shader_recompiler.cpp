@@ -1,18 +1,6 @@
 #include "shader_recompiler.h"
 #include "shader_common.h"
 
-static constexpr char SWIZZLES[] = 
-{ 
-    'x',
-    'y', 
-    'z', 
-    'w', 
-    '0', 
-    '1',
-    '_',
-    '_'
-};
-
 static constexpr const char* USAGE_TYPES[] =
 {
     "float4", // POSITION
@@ -383,7 +371,7 @@ void ShaderRecompiler::recompile(const AluInstruction& instr)
         SCALAR_CONSTANT_1
     };
 
-    auto op = [&](size_t operand)
+    auto op = [&](size_t operand, bool fullVectorMask = false)
         {
             size_t reg = 0;
             size_t swizzle = 0;
@@ -452,6 +440,10 @@ void ShaderRecompiler::recompile(const AluInstruction& instr)
             if (select)
             {
                 regFormatted = fmt::format("r{}", reg);
+            }
+            else if (pdzMode)
+            {
+                regFormatted = pdzConstantRef(reg, instr.const0Relative, instr.constAddressRegisterRelative);
             }
             else
             {
@@ -525,6 +517,9 @@ void ShaderRecompiler::recompile(const AluInstruction& instr)
                     mask = instr.vectorWriteMask != 0 ? instr.vectorWriteMask : 0b1;
                     break;
                 }
+
+                if (fullVectorMask)
+                    mask = 0b1111;
 
                 for (size_t i = 0; i < 4; i++)
                 {
@@ -623,6 +618,14 @@ void ShaderRecompiler::recompile(const AluInstruction& instr)
 
                 break;
 
+            case ExportRegister::VSPointSizeEdgeFlagKillVertex:
+                if (pdzMode)
+                {
+                    exportRegister = "oPts";
+                    break;
+                }
+                [[fallthrough]];
+
             default:
             {
                 auto findResult = interpolators.find(instr.vectorDest);
@@ -660,7 +663,7 @@ void ShaderRecompiler::recompile(const AluInstruction& instr)
     else if (instr.vectorOpcode >= AluVectorOpcode::MaxA)
     {
         indent();
-        println("a0 = (int)clamp(floor(({}).w + 0.5), -256.0, 255.0);", op(VECTOR_0));
+        println("a0 = (int)clamp(floor(({}).w + 0.5), -256.0, 255.0);", op(VECTOR_0, true));
     }
 
     uint32_t vectorWriteMask = instr.vectorWriteMask;

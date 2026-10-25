@@ -13,6 +13,8 @@ add_executable(XenosRecomp
     main.cpp
     pch.h
     pdz_main.cpp
+    pdz_recompiler.cpp
+    shader_common_pdz.hlsli
     shader_pdz.h
     shader.h
     shader_code.h
@@ -45,6 +47,7 @@ if (WIN32)
     target_compile_definitions(XenosRecomp PRIVATE _CRT_SECURE_NO_WARNINGS)
     add_custom_command(TARGET XenosRecomp POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_RUNTIME_DLLS:XenosRecomp> $<TARGET_FILE_DIR:XenosRecomp>
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/shader_common_pdz.hlsli" $<TARGET_FILE_DIR:XenosRecomp>
         COMMAND_EXPAND_LISTS
     )
 endif()

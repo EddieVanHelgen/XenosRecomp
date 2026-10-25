@@ -15,6 +15,8 @@
 #include <execution>
 #include <filesystem>
 #include <map>
+#include <set>
+#include <cmath>
 #include <smolv.h>
 #include <fmt/core.h>
 #include <string>
