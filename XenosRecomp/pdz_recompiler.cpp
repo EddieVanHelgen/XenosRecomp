@@ -258,6 +258,18 @@ void ShaderRecompiler::recompilePdzTextureFetch(const TextureFetchInstruction& i
     std::string texture = fmt::format("{}[{}]", textureArray, instr.constIndex);
     std::string sampler = fmt::format("g_Samplers[{}]", pdzSamplerVariant(instr));
 
+    {
+        PdzTextureFetchSite site{};
+        site.slot = instr.constIndex;
+        site.dimension = uint32_t(instr.dimension);
+        site.unnormalized = instr.texCoordDenorm != 0;
+        site.computedLod = instr.useCompLod && (isPixelShader || instr.useRegGradients);
+        site.registerLod = instr.useRegLod != 0;
+        site.lodBias = instr.lodBias / 16.0f;
+        site.offsets = instr.offsetX != 0 || instr.offsetY != 0 || instr.offsetZ != 0;
+        pdz.textureFetchSites.push_back(site);
+    }
+
     std::string coord = fmt::format("r{}.", instr.srcRegister);
     for (uint32_t i = 0; i < componentCount; i++)
         coord += SWIZZLES[(instr.srcSwizzle >> (i * 2)) & 0x3];
@@ -1244,6 +1256,15 @@ void ShaderRecompiler::pdzBuildJson(const pdz::Shader& shader)
     }
     j += "  ],\n";
     j += fmt::format("  \"uses_register_lod\": {},\n", pdz.usesRegisterLod ? "true" : "false");
+    j += "  \"texture_fetches\": [";
+    for (size_t i = 0; i < pdz.textureFetchSites.size(); i++)
+    {
+        auto& s = pdz.textureFetchSites[i];
+        j += fmt::format("{}{{\"slot\": {}, \"dimension\": \"{}\", \"unnormalized\": {}, \"lod\": \"{}\", \"lod_bias\": {}, \"offsets\": {}}}", i ? ", " : "",
+            s.slot, DIMENSION_NAMES[s.dimension & 3], s.unnormalized ? "true" : "false",
+            s.computedLod ? "computed" : (s.registerLod ? "register" : "zero"), s.lodBias, s.offsets ? "true" : "false");
+    }
+    j += "],\n";
 
     j += "  \"unsupported\": [";
     first = true;

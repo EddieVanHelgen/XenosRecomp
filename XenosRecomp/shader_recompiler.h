@@ -21,6 +21,13 @@ struct PdzSamplerVariant
     uint32_t slot, magFilter, minFilter, mipFilter, anisoFilter, volMagFilter, volMinFilter, dimension;
 };
 
+struct PdzTextureFetchSite
+{
+    uint32_t slot, dimension;
+    bool unnormalized, computedLod, registerLod, offsets;
+    float lodBias;
+};
+
 struct PdzLoopSite
 {
     uint32_t constant;
@@ -54,6 +61,7 @@ struct PdzState
     std::unordered_map<uint32_t, uint32_t> vertexInputsByAddress;
     std::vector<PdzSamplerVariant> samplerVariants;
     std::vector<PdzLoopSite> loopSites;
+    std::vector<PdzTextureFetchSite> textureFetchSites;
     std::vector<std::string> unsupported;
 };
 
