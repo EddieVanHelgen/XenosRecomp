@@ -97,13 +97,16 @@ void inputTypeFor(VertexFormat format, bool isSigned, bool normalized, std::stri
     }
 
     const char* vecSuffix = info.components == 1 ? "" : (info.components == 2 ? "2" : (info.components == 3 ? "3" : "4"));
+    // Components the format does not have read as 0 (SDK dxbc_translator_fetch.cpp: "Write zeros to components
+    // not present in the format"), not the D3D input assembler's (0, 0, 0, 1); a 1 the compiler wants comes
+    // from an explicit 1 in the destination swizzle, which printDstSwizzle01 writes.
     auto pad = [&](const std::string& expr)
     {
         switch (info.components)
         {
-        case 1: return fmt::format("float4({}, 0.0, 0.0, 1.0)", expr);
-        case 2: return fmt::format("float4({}, 0.0, 1.0)", expr);
-        case 3: return fmt::format("float4({}, 1.0)", expr);
+        case 1: return fmt::format("float4({}, 0.0, 0.0, 0.0)", expr);
+        case 2: return fmt::format("float4({}, 0.0, 0.0)", expr);
+        case 3: return fmt::format("float4({}, 0.0)", expr);
         default: return expr;
         }
     };
