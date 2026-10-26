@@ -1200,6 +1200,28 @@ void ShaderRecompiler::pdzBuildJson(const pdz::Shader& shader)
     }
     j += "],\n";
 
+    // bool / loop constant defaults from the literal block (records past the float file): the renderer applies
+    // them at bind like the float literals, before the game's own Set*ShaderConstantB / I writes.  Listed only
+    // when present (absent = none), so sidecars without such records stay byte-identical.
+    if (!shader.boolLiterals.empty())
+    {
+        j += "  \"bool_literals\": [";
+        for (size_t i = 0; i < shader.boolLiterals.size(); i++)
+            j += fmt::format("{}{{\"dword\": {}, \"value\": {}}}", i ? ", " : "", shader.boolLiterals[i].first, shader.boolLiterals[i].second);
+        j += "],\n";
+    }
+    if (!shader.loopLiterals.empty())
+    {
+        j += "  \"loop_literals\": [";
+        for (size_t i = 0; i < shader.loopLiterals.size(); i++)
+        {
+            const uint32_t v = shader.loopLiterals[i].second;
+            j += fmt::format("{}{{\"loop\": {}, \"value\": {}, \"count\": {}, \"start\": {}, \"step\": {}}}", i ? ", " : "",
+                shader.loopLiterals[i].first, v, v & 0xFF, (v >> 8) & 0xFF, int32_t(int8_t((v >> 16) & 0xFF)));
+        }
+        j += "],\n";
+    }
+
     if (!shader.constantNames.empty())
     {
         j += "  \"ctab\": [\n";

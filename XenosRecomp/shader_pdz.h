@@ -28,6 +28,11 @@
 //                              PS c0..c2 (12 dwords), 0x04100004 = VS c17, 0x12F00004 = VS c255,
 //                              0x22E00008 = PS c254..c255.
 //     u32 payload[count]       IEEE floats
+//   The float file ends at 0x2300; the 8 bool constant dwords follow at 0x2300 (256 bools, VS b0..b127 then
+//   PS b128..b255) and the 32 loop constant dwords at 0x2320 (VS i0..i15, PS i16..i31; count 7:0, start
+//   15:8, step 23:16).  Records there are bool / loop defaults, kept apart from the float literals
+//   (Shader::boolLiterals / loopLiterals); the one PDZ record is 0x23200001 = loop i0 of the exe VS
+//   4e9babb73e5dbfe9 (0x00010002: count 2, start 0, step 1).  Offsets are absolute for both shader types.
 //   The D3D runtime uploads these when the shader is set, so the translator has to bake them in.
 //
 // Program-info block (at programOffset, to headerSize), dword indexed:
@@ -97,6 +102,8 @@ struct Shader
     const be<uint32_t>* ucode = nullptr;        // guest order dwords
     uint32_t ucodeDwords = 0;
     std::vector<LiteralRecord> literals;
+    std::vector<std::pair<uint32_t, uint32_t>> boolLiterals; // {bool dword 0..7, value} from records at 0x2300..0x231F
+    std::vector<std::pair<uint32_t, uint32_t>> loopLiterals; // {loop constant 0..31, value} from records at 0x2320..0x239F
     std::vector<InterpolatorDecl> interpolators; // container only
     std::vector<VertexElementDecl> vertexElements; // container VS only
     std::vector<uint32_t> patchList;            // container VS only
@@ -168,7 +175,33 @@ static inline bool parseLegacyContainer(const uint8_t* data, size_t size, Shader
             const uint32_t byteOffset = header >> 16;
             const uint32_t count = header & 0xFFFF;
             pos += 4;
-            if (pos + count * 4 > end || byteOffset < 0x300 || (byteOffset & 0xF) != 0)
+            if (pos + count * 4 > end)
+            {
+                error = fmt::format("bad literal record {:#x}", header);
+                return false;
+            }
+            constexpr uint32_t BOOL_FILE = 0x2300, LOOP_FILE = 0x2320, FLOW_END = 0x23A0;
+            if (byteOffset >= BOOL_FILE)
+            {
+                // bool / loop constant defaults: one dword each, never float registers
+                if ((byteOffset & 3) != 0 || byteOffset + count * 4 > FLOW_END)
+                {
+                    error = fmt::format("bad bool / loop literal record {:#x}", header);
+                    return false;
+                }
+                for (uint32_t i = 0; i < count; i++)
+                {
+                    const uint32_t at = byteOffset + i * 4;
+                    const uint32_t value = rd32(data + pos + i * 4);
+                    if (at < LOOP_FILE)
+                        out.boolLiterals.emplace_back((at - BOOL_FILE) / 4, value);
+                    else
+                        out.loopLiterals.emplace_back((at - LOOP_FILE) / 4, value);
+                }
+                pos += count * 4;
+                continue;
+            }
+            if (byteOffset < 0x300 || (byteOffset & 0xF) != 0 || byteOffset + count * 4 > BOOL_FILE)
             {
                 error = fmt::format("bad literal record {:#x}", header);
                 return false;

@@ -95,6 +95,11 @@ static int pdzDump(const char* path, const char* typeArg)
             fmt::print(" {}{:g}", (i % 4) == 0 ? "| " : "", pdzAsFloat(lit.dwords[i]));
         fmt::println("");
     }
+    for (auto& [dword, value] : shader.boolLiterals)
+        fmt::println("  bool literal dword {} (b{}..b{}) = {:#010x}", dword, dword * 32, dword * 32 + 31, value);
+    for (auto& [loop, value] : shader.loopLiterals)
+        fmt::println("  loop literal i{} = {:#010x} (count {}, start {}, step {})", loop, value, value & 0xFF, (value >> 8) & 0xFF,
+            int32_t(int8_t((value >> 16) & 0xFF)));
     for (auto& c : shader.constantNames)
         fmt::println("  ctab {} : {}{}+{}", c.name, "bics"[uint32_t(c.set) & 3], c.registerIndex, c.registerCount);
     if (!shader.ctabCreator.empty())
