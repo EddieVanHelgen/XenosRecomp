@@ -147,6 +147,100 @@ void inputTypeFor(VertexFormat format, bool isSigned, bool normalized, std::stri
     }
 }
 
+// HLSL body of float4 pdzVfetchRaw<k>(int index) for a computed-index fetch: the words come from a raw view of
+// the fetch constant's buffer (byte 0 = the fetch constant's base address, size = the fetch constant's size,
+// so a read past the end returns 0 as on the SDK's masked load) holding the dwords as the GPU sees them after
+// the fetch constant's endian swap; component 0 is in the low bits of the first dword, as the hardware unpacks
+// them.  Missing components read 0 (SDK, see inputTypeFor).
+std::string rawFetchBody(const PdzRawVertexFetch& f, const std::string& buffer)
+{
+    const FormatInfo info = formatInfo(VertexFormat(f.format));
+    const VertexFormat format = VertexFormat(f.format);
+    const char* sgn = f.isSigned ? "true" : "false";
+    const char* nrm = f.normalized ? "true" : "false";
+    std::string body = fmt::format("\tconst uint a = uint(index * {} + {}) * 4u;\n", f.stride, f.offset);
+    std::string value;
+    switch (format)
+    {
+    case VertexFormat::k_2_10_10_10:
+        value = fmt::format("decode2_10_10_10({}.Load(a), {}, {})", buffer, sgn, nrm);
+        break;
+    case VertexFormat::k_10_11_11:
+        value = fmt::format("decode10_11_11({}.Load(a), {}, {})", buffer, sgn, nrm);
+        break;
+    case VertexFormat::k_11_11_10:
+        value = fmt::format("decode11_11_10({}.Load(a), {}, {})", buffer, sgn, nrm);
+        break;
+    case VertexFormat::k_32_FLOAT:
+        value = fmt::format("float4(asfloat({}.Load(a)), 0.0, 0.0, 0.0)", buffer);
+        break;
+    case VertexFormat::k_32_32_FLOAT:
+        value = fmt::format("float4(asfloat({}.Load2(a)), 0.0, 0.0)", buffer);
+        break;
+    case VertexFormat::k_32_32_32_FLOAT:
+        value = fmt::format("float4(asfloat({}.Load3(a)), 0.0)", buffer);
+        break;
+    case VertexFormat::k_32_32_32_32_FLOAT:
+        value = fmt::format("asfloat({}.Load4(a))", buffer);
+        break;
+    case VertexFormat::k_32:
+    case VertexFormat::k_32_32:
+    case VertexFormat::k_32_32_32_32:
+    {
+        const char* load = info.components == 1 ? "uint4({}.Load(a), 0u, 0u, 0u)" : info.components == 2 ? "uint4({}.Load2(a), 0u, 0u)" : "{}.Load4(a)";
+        std::string words = fmt::vformat(load, fmt::make_format_args(buffer));
+        const uint32_t missingMask = info.components == 1 ? 0xE : info.components == 2 ? 0xC : 0;
+        std::string zero = missingMask == 0xE ? " * float4(1.0, 0.0, 0.0, 0.0)" : missingMask == 0xC ? " * float4(1.0, 1.0, 0.0, 0.0)" : "";
+        if (f.normalized)
+            value = fmt::format("decode32Normalized({}, {}){}", words, sgn, zero);
+        else
+            value = fmt::format("(float4({}({})){})", f.isSigned ? "int4" : "uint4", words, zero);
+        break;
+    }
+    case VertexFormat::k_16_16:
+    case VertexFormat::k_16_16_16_16:
+    case VertexFormat::k_16_16_FLOAT:
+    case VertexFormat::k_16_16_16_16_FLOAT:
+    {
+        const bool four = format == VertexFormat::k_16_16_16_16 || format == VertexFormat::k_16_16_16_16_FLOAT;
+        body += four ? fmt::format("\tconst uint2 w = {}.Load2(a);\n", buffer) : fmt::format("\tconst uint2 w = uint2({}.Load(a), 0u);\n", buffer);
+        if (info.isFloat)
+        {
+            value = four ? "float4(f16tof32(w.x & 0xFFFFu), f16tof32(w.x >> 16), f16tof32(w.y & 0xFFFFu), f16tof32(w.y >> 16))"
+                         : "float4(f16tof32(w.x & 0xFFFFu), f16tof32(w.x >> 16), 0.0, 0.0)";
+        }
+        else
+        {
+            if (f.isSigned)
+                body += "\tfloat4 v = float4(int4(int(w.x << 16) >> 16, int(w.x) >> 16, int(w.y << 16) >> 16, int(w.y) >> 16));\n";
+            else
+                body += "\tfloat4 v = float4(uint4(w.x & 0xFFFFu, w.x >> 16, w.y & 0xFFFFu, w.y >> 16));\n";
+            if (f.normalized)
+                body += f.isSigned ? "\tv = max(v / 32767.0, -1.0);\n" : "\tv = v / 65535.0;\n";
+            value = four ? "v" : "float4(v.xy, 0.0, 0.0)";
+        }
+        break;
+    }
+    case VertexFormat::k_8_8_8_8:
+    {
+        body += fmt::format("\tconst uint w = {}.Load(a);\n", buffer);
+        if (f.isSigned)
+            body += "\tfloat4 v = float4(int4(int(w << 24) >> 24, int(w << 16) >> 24, int(w << 8) >> 24, int(w) >> 24));\n";
+        else
+            body += "\tfloat4 v = float4(uint4(w & 0xFFu, (w >> 8) & 0xFFu, (w >> 16) & 0xFFu, w >> 24));\n";
+        if (f.normalized)
+            body += f.isSigned ? "\tv = max(v / 127.0, -1.0);\n" : "\tv = v / 255.0;\n";
+        value = "v";
+        break;
+    }
+    default:
+        value = "float4(0.0, 0.0, 0.0, 0.0)";
+        break;
+    }
+    body += fmt::format("\treturn {};\n", value);
+    return body;
+}
+
 std::string jsonEscape(const std::string& s)
 {
     std::string out;
@@ -192,9 +286,25 @@ void ShaderRecompiler::recompilePdzVertexFetch(const VertexFetchInstruction& ins
         ++indentation;
     }
 
-    auto input = pdz.vertexInputsByAddress.find(address);
-    assert(input != pdz.vertexInputsByAddress.end());
-    const PdzVertexInput& vi = pdz.vertexInputs[input->second];
+    std::string source;
+    auto raw = pdz.rawVertexFetchesByAddress.find(address);
+    if (raw != pdz.rawVertexFetchesByAddress.end())
+    {
+        // computed index: a full fetch latches the index (vfetch_mini reuses it, SDK), then reads the raw buffer
+        const PdzRawVertexFetch& rf = pdz.rawVertexFetches[raw->second];
+        if (!rf.isMini)
+        {
+            indent();
+            println("vfIndex = int(floor(r{}.{}{}));", rf.srcRegister, SWIZZLES[rf.srcSwizzle & 3], rf.indexRounded ? " + 0.5" : "");
+        }
+        source = fmt::format("pdzVfetchRaw{}(vfIndex)", raw->second);
+    }
+    else
+    {
+        auto input = pdz.vertexInputsByAddress.find(address);
+        assert(input != pdz.vertexInputsByAddress.end());
+        source = pdz.vertexInputs[input->second].convertedName;
+    }
 
     if (hasDstComponents(instr.dstSwizzle))
     {
@@ -203,9 +313,9 @@ void ShaderRecompiler::recompilePdzVertexFetch(const VertexFetchInstruction& ins
         printDstSwizzle(instr.dstSwizzle, false);
         out += " = ";
         if (instr.expAdjust != 0)
-            print("({} * {}).", vi.convertedName, std::ldexp(1.0f, instr.expAdjust));
+            print("({} * {}).", source, std::ldexp(1.0f, instr.expAdjust));
         else
-            print("{}.", vi.convertedName);
+            print("{}.", source);
         printDstSwizzle(instr.dstSwizzle, true);
         out += ";\n";
     }
@@ -472,7 +582,17 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
     pdz.cfBytes = instrSize;
 
     bool written[64]{};
-    uint32_t lastFullSlot = 0, lastFullStride = 0;
+    uint8_t writtenComponents[64]{}; // per-component writes, for the computed-index vfetch test
+    uint32_t lastFullSlot = 0, lastFullStride = 0, lastFullSrcRegister = 0, lastFullSrcSwizzle = 0;
+    bool lastFullComputed = false, lastFullIndexRounded = false;
+    auto fetchWriteMask = [](uint32_t dstSwizzle)
+    {
+        uint8_t mask = 0;
+        for (uint32_t c = 0; c < 4; c++)
+            if (((dstSwizzle >> (c * 3)) & 7) != 7)
+                mask |= uint8_t(1u << c);
+        return mask;
+    };
 
     auto noteRead = [&](uint32_t reg)
     {
@@ -521,6 +641,8 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
                 written[alu.vectorDest & 0x3F] = true;
             if (alu.scalarWriteMask != 0)
                 written[alu.scalarDest & 0x3F] = true;
+            writtenComponents[alu.vectorDest & 0x3F] |= uint8_t(alu.vectorWriteMask);
+            writtenComponents[alu.scalarDest & 0x3F] |= uint8_t(alu.scalarWriteMask);
         }
         if (alu.vectorOpcode == AluVectorOpcode::MaxA || alu.scalarOpcode == AluScalarOpcode::MaxAs || alu.scalarOpcode == AluScalarOpcode::MaxAsf)
             pdz.writesA0 = true;
@@ -587,7 +709,36 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
                         if (vertexFetch.opcode == FetchOpcode::VertexFetch)
                         {
                             noteRead(vertexFetch.srcRegister);
+                            // Computed index: the index operand is not the vertex index the hardware put in r0.x
+                            // (another register or component, or r0.x after the shader wrote it); with stride 0
+                            // the index does not matter (every vertex reads the base element).  vfetch_mini
+                            // follows its full fetch.
+                            bool computedIndex;
+                            if (vertexFetch.isMiniFetch)
+                                computedIndex = lastFullComputed;
+                            else
+                            {
+                                const bool vertexIndex = vertexFetch.srcRegister == 0 && vertexFetch.srcSwizzle == 0 &&
+                                    !(writtenComponents[0] & 1) && !vertexFetch.srcRegisterAm;
+                                computedIndex = !vertexIndex && vertexFetch.stride != 0;
+                                lastFullComputed = computedIndex;
+                                lastFullSrcRegister = vertexFetch.srcRegister;
+                                lastFullSrcSwizzle = vertexFetch.srcSwizzle;
+                                lastFullIndexRounded = vertexFetch.isIndexRounded != 0;
+                                // An index component the shader never wrote was loaded by the hardware: in a
+                                // tessellated draw the VS runs as a domain shader with r0.xy = domain location and
+                                // r0.z / r1.xyz = control point indices (SDK dxbc_translator.cpp, kQuadDomainCPIndexed).
+                                // A vertex shader cannot receive them; the raw fetch path is right, its index is not.
+                                if (computedIndex && !(writtenComponents[vertexFetch.srcRegister & 0x3F] & (1u << (vertexFetch.srcSwizzle & 3))))
+                                {
+                                    pdz.vfetchIndexFromHardwareRegister = true;
+                                    pdz.unsupported.push_back(fmt::format("vfetch index r{}.{} is never written by the shader (tessellation domain "
+                                        "shader input: domain location / control point index); needs a hull / domain shader path",
+                                        uint32_t(vertexFetch.srcRegister), SWIZZLES[vertexFetch.srcSwizzle & 3]));
+                                }
+                            }
                             written[vertexFetch.dstRegister] = true;
+                            writtenComponents[vertexFetch.dstRegister & 0x3F] |= fetchWriteMask(vertexFetch.dstSwizzle);
 
                             PdzVertexInput vi{};
                             vi.address = address + i;
@@ -609,40 +760,65 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
                             if (vertexFetch.srcRegisterAm || vertexFetch.dstRegisterAam)
                                 pdz.unsupported.push_back("relative vfetch register");
 
-                            // one HLSL input per distinct (slot, offset, format, signed, normalized); unbound fetches (format 0) stay one per instruction
-                            if (vi.format == 0 && shader.fromContainer)
+                            if (computedIndex)
                             {
-                                for (auto& e : shader.vertexElements)
-                                    if (e.address == vi.address)
-                                    {
-                                        vi.usage = e.usage;
-                                        vi.usageIndex = e.usageIndex;
-                                    }
+                                PdzRawVertexFetch rf{};
+                                rf.address = vi.address;
+                                rf.slot = vi.slot;
+                                rf.offset = vi.offset;
+                                rf.stride = vi.stride;
+                                rf.format = vi.format;
+                                rf.isSigned = vi.isSigned;
+                                rf.normalized = vi.normalized;
+                                rf.isMini = vi.isMini;
+                                rf.expAdjust = vi.expAdjust;
+                                // vfetch_mini has no index operand of its own: it reuses the full fetch's address
+                                rf.indexRounded = lastFullIndexRounded;
+                                rf.srcRegister = lastFullSrcRegister;
+                                rf.srcSwizzle = lastFullSrcSwizzle;
+                                if (rf.format == 0 || formatInfo(VertexFormat(rf.format)).components == 0)
+                                    pdz.unsupported.push_back(fmt::format("computed-index vfetch at {} with unknown format {}", rf.address, rf.format));
+                                pdz.rawVertexFetchesByAddress.emplace(rf.address, uint32_t(pdz.rawVertexFetches.size()));
+                                pdz.rawVertexFetches.push_back(rf);
                             }
-                            size_t index = pdz.vertexInputs.size();
-                            for (size_t k = 0; k < pdz.vertexInputs.size(); k++)
+
+                            else
                             {
-                                auto& e = pdz.vertexInputs[k];
-                                if (vi.format == 0)
+                                // one HLSL input per distinct (slot, offset, format, signed, normalized); unbound fetches (format 0) stay one per instruction
+                                if (vi.format == 0 && shader.fromContainer)
                                 {
-                                    // unbound: one input per declaration element (an element can be fetched twice)
-                                    if (vi.usage != 0xFFFFFFFF && e.usage == vi.usage && e.usageIndex == vi.usageIndex)
+                                    for (auto& e : shader.vertexElements)
+                                        if (e.address == vi.address)
+                                        {
+                                            vi.usage = e.usage;
+                                            vi.usageIndex = e.usageIndex;
+                                        }
+                                }
+                                size_t index = pdz.vertexInputs.size();
+                                for (size_t k = 0; k < pdz.vertexInputs.size(); k++)
+                                {
+                                    auto& e = pdz.vertexInputs[k];
+                                    if (vi.format == 0)
+                                    {
+                                        // unbound: one input per declaration element (an element can be fetched twice)
+                                        if (vi.usage != 0xFFFFFFFF && e.usage == vi.usage && e.usageIndex == vi.usageIndex)
+                                        {
+                                            index = k;
+                                            break;
+                                        }
+                                        continue;
+                                    }
+                                    if (e.slot == vi.slot && e.offset == vi.offset && e.format == vi.format &&
+                                        e.isSigned == vi.isSigned && e.normalized == vi.normalized && e.expAdjust == vi.expAdjust)
                                     {
                                         index = k;
                                         break;
                                     }
-                                    continue;
                                 }
-                                if (e.slot == vi.slot && e.offset == vi.offset && e.format == vi.format &&
-                                    e.isSigned == vi.isSigned && e.normalized == vi.normalized && e.expAdjust == vi.expAdjust)
-                                {
-                                    index = k;
-                                    break;
-                                }
+                                if (index == pdz.vertexInputs.size())
+                                    pdz.vertexInputs.push_back(vi);
+                                pdz.vertexInputsByAddress.emplace(vi.address, uint32_t(index));
                             }
-                            if (index == pdz.vertexInputs.size())
-                                pdz.vertexInputs.push_back(vi);
-                            pdz.vertexInputsByAddress.emplace(vi.address, uint32_t(index));
                         }
                         else
                         {
@@ -650,6 +826,7 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
                             if (textureFetch.opcode == FetchOpcode::TextureFetch || textureFetch.opcode == FetchOpcode::GetTextureWeights)
                             {
                                 written[textureFetch.dstRegister] = true;
+                                writtenComponents[textureFetch.dstRegister & 0x3F] |= fetchWriteMask(textureFetch.dstSwizzle);
                                 pdz.textureSlots[textureFetch.constIndex] |= 1u << uint32_t(textureFetch.dimension);
                                 if (!isPixelShader)
                                     pdz.vertexTextureFetch = true;
@@ -822,6 +999,8 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
     out += "\tbool p0 = false;\n";
     out += "\tfloat ps = 0.0;\n";
     out += "\tfloat texLod = 0.0;\n";
+    if (!pdz.rawVertexFetches.empty())
+        out += "\tint vfIndex = 0;\n";
     out += "\tCubeMapData cubeMapData = (CubeMapData)0;\n";
 
     if (pdz.simpleControlFlow)
@@ -1124,6 +1303,26 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
         // Scalar reciprocal / log helpers, only the ones this shader uses (SDK dxbc_translator_alu.cpp):
         // rcpf / rsqf flush an infinite result to 0 keeping its sign, rcpc / rsqc turn it into +-FLT_MAX,
         // logc turns -inf into -FLT_MAX; rcp / rsq / log stay unclamped (emitted inline).
+        if (!pdz.rawVertexFetches.empty())
+        {
+            // Computed-index vertex fetches read a raw view of the vertex fetch constant's buffer at t<slot>, space3
+            // (sidecar "vertex_fetch_raw"); the input assembler only feeds the fetches indexed by the vertex index.
+            std::string raw = "// computed-index vertex fetches: raw buffers (t<fetch constant slot>, space3)\n";
+            std::set<uint32_t> slots;
+            for (auto& f : pdz.rawVertexFetches)
+                slots.insert(f.slot);
+            for (uint32_t slot : slots)
+                raw += fmt::format("ByteAddressBuffer g_VertexFetchRaw{0} : register(t{0}, space3);\n", slot);
+            for (size_t k = 0; k < pdz.rawVertexFetches.size(); k++)
+            {
+                auto& f = pdz.rawVertexFetches[k];
+                raw += fmt::format("float4 pdzVfetchRaw{}(int index) // vfetch{} at {}, slot {}, {} stride {} offset {}\n{{\n", k,
+                    f.isMini ? "_mini" : "_full", f.address, f.slot, formatInfo(VertexFormat(f.format)).name, f.stride, f.offset);
+                raw += rawFetchBody(f, fmt::format("g_VertexFetchRaw{}", f.slot));
+                raw += "}\n";
+            }
+            table = raw + "\n" + table;
+        }
         if (pdz.scalarHelpers != 0)
         {
             std::string helpers;
@@ -1248,6 +1447,25 @@ void ShaderRecompiler::pdzBuildJson(const pdz::Shader& shader)
                 i + 1 < pdz.vertexInputs.size() ? "," : "");
         }
         j += "  ],\n";
+        if (!pdz.rawVertexFetches.empty())
+        {
+            // computed-index fetches: not in vertex_inputs (no input-layout element); the renderer binds a raw SRV of
+            // the fetch constant's buffer at t<slot>, space3 (dwords after the fetch constant's endian swap, view
+            // size = the fetch constant's size)
+            j += "  \"vertex_fetch_raw\": [\n";
+            for (size_t i = 0; i < pdz.rawVertexFetches.size(); i++)
+            {
+                auto& f = pdz.rawVertexFetches[i];
+                j += fmt::format("    {{\"function\": \"pdzVfetchRaw{}\", \"slot\": {}, \"register\": \"t{}, space3\", \"offset_dwords\": {}, \"stride_dwords\": {}, "
+                    "\"format\": \"{}\", \"format_code\": {}, \"signed\": {}, \"normalized\": {}, \"exp_adjust\": {}, \"index\": \"r{}.{}\", "
+                    "\"index_rounded\": {}, \"vfetch_address\": {}, \"mini\": {}}}{}\n",
+                    i, f.slot, f.slot, f.offset, f.stride, formatInfo(VertexFormat(f.format)).name, f.format, f.isSigned ? "true" : "false",
+                    f.normalized ? "true" : "false", f.expAdjust, f.srcRegister, SWIZZLES[f.srcSwizzle & 3], f.indexRounded ? "true" : "false",
+                    f.address, f.isMini ? "true" : "false", i + 1 < pdz.rawVertexFetches.size() ? "," : "");
+            }
+            j += "  ],\n";
+            j += fmt::format("  \"vertex_fetch_index_from_hardware_register\": {},\n", pdz.vfetchIndexFromHardwareRegister ? "true" : "false");
+        }
         j += fmt::format("  \"interpolators_written\": \"0x{:04x}\",\n", pdz.interpolatorsWritten);
         j += fmt::format("  \"writes_position\": {},\n", pdz.writesPosition ? "true" : "false");
         j += fmt::format("  \"writes_point_size\": {},\n", pdz.writesPointSize ? "true" : "false");

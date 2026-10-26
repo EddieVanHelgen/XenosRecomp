@@ -16,6 +16,17 @@ struct PdzVertexInput
     std::string name, semantic, hlslType, dxgiFormat, convert, convertedName;
 };
 
+// A vertex fetch whose index is not the vertex index (r0.x as the hardware loaded it): the vertex is
+// computed by the shader, so the input assembler cannot deliver it.  Read from a raw buffer instead
+// (SDK dxbc_translator_fetch.cpp ProcessVertexFetchInstruction: index = floor(src) or floor(src + 0.5),
+// address = index * stride + offset dwords; vfetch_mini reuses the address of the previous full fetch).
+struct PdzRawVertexFetch
+{
+    uint32_t address = 0, slot = 0, offset = 0, stride = 0, format = 0, srcRegister = 0, srcSwizzle = 0;
+    int32_t expAdjust = 0;
+    bool isSigned = false, normalized = false, isMini = false, indexRounded = false;
+};
+
 struct PdzSamplerVariant
 {
     uint32_t slot, magFilter, minFilter, mipFilter, anisoFilter, volMagFilter, volMinFilter, dimension;
@@ -71,6 +82,9 @@ struct PdzState
     std::unordered_map<uint32_t, const pdz::LiteralRecord*> literalRegisters;
     std::vector<PdzVertexInput> vertexInputs;
     std::unordered_map<uint32_t, uint32_t> vertexInputsByAddress;
+    std::vector<PdzRawVertexFetch> rawVertexFetches;            // computed-index fetches (raw buffer path)
+    bool vfetchIndexFromHardwareRegister = false;               // a computed index the shader never wrote (domain shader input)
+    std::unordered_map<uint32_t, uint32_t> rawVertexFetchesByAddress;
     std::vector<PdzSamplerVariant> samplerVariants;
     std::vector<PdzLoopSite> loopSites;
     std::vector<PdzTextureFetchSite> textureFetchSites;
