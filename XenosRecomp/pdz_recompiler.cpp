@@ -760,9 +760,11 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
     if (isPixelShader)
     {
         params.push_back("\tin float4 iPos : SV_Position");
+        // Every interpolator is declared, read or not: D3D12 links the PS input signature to the VS / GS output
+        // by register, and the VS always writes TEXCOORD0..15, so a PS reading TEXCOORD0, 1 and 10 alone put
+        // TEXCOORD10 in register 3 against the VS's register 11 (CreateGraphicsPipelineState E_INVALIDARG, log 028).
         for (uint32_t i = 0; i < PDZ_INTERPOLATOR_COUNT; i++)
-            if (psInterpolatorMask & (1u << i))
-                params.push_back(fmt::format("\tin float4 i{0} : TEXCOORD{0}", i));
+            params.push_back(fmt::format("\tin float4 i{0} : TEXCOORD{0}", i));
         params.push_back("\tin uint iFace : SV_IsFrontFace");
         for (uint32_t i = 0; i < 4; i++)
             if (pdz.colorOutputs & (1u << i))
