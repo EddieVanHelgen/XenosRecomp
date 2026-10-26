@@ -5,7 +5,7 @@
 //                                  i.e. SetPixelShaderConstantB(n) sets bit 128+n) and the 32 loop constants
 //                                  as the hardware dword (count 7:0, start 15:8, step 23:16, signed;
 //                                  SetPixelShaderConstantI(n, {count, start, step}) packs into loop 16+n)
-//   b2 space0  SystemConstants     half-pixel offset, alpha test, flags
+//   b2 space0  SystemConstants     half-pixel offset, alpha test, VTE flags, guest -> host NDC scale / offset
 //   t0..t31    space0 Texture2D, space1 Texture3D, space2 TextureCube: one per texture fetch constant slot
 //   s0..s31    space0 SamplerState: per-shader sampler variants; the sidecar .json lists, for each index,
 //                                  the fetch constant slot and the per-instruction filter overrides
@@ -38,8 +38,27 @@ cbuffer SystemConstants : register(b2, space0)
     float g_AlphaRef;           // alpha test reference 0..1
     uint g_AlphaFunc;           // 0 = off, else D3DCMPFUNC (1 never .. 8 always)
     float4 g_PointSize;         // x = default point size
-    uint g_Flags;               // reserved
+    uint g_Flags;               // PA_CL_VTE_CNTL formats: bit 0 VTX_XY_FMT (XY pre-divided by W), bit 1 VTX_Z_FMT
+                                // (Z pre-divided by W), bit 2 VTX_W0_FMT (W exported as W, not 1/W)
+    uint3 g_Reserved;
+    float4 g_NdcScale;          // xyz: guest clip space -> host clip space scale (viewport, clip space, Y flip)
+    float4 g_NdcOffset;         // xyz: offset multiplied by W (viewport / window / half-pixel offsets)
 };
+
+// Vertex position epilogue, the same steps as the ReXGlue SDK's DxbcShaderTranslator::CompleteVertexOrDomainShader
+// with ndc_scale / ndc_offset from draw_util::GetHostViewportInfo (computed per draw by the native renderer).
+float4 pdzHostPosition(float4 p)
+{
+    if ((g_Flags & 4u) == 0u)
+        p.w = 1.0 / p.w;
+    if ((g_Flags & 1u) != 0u)
+        p.xy *= p.w;
+    if ((g_Flags & 2u) != 0u)
+        p.z *= p.w;
+    p.xy += g_HalfPixelOffset * p.w;
+    p.xyz = p.xyz * g_NdcScale.xyz + g_NdcOffset.xyz * p.w;
+    return p;
+}
 
 Texture2D<float4> g_Texture2D[32] : register(t0, space0);
 Texture3D<float4> g_Texture3D[32] : register(t0, space1);

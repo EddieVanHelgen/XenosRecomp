@@ -1071,7 +1071,7 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
                 else
                 {
                     indent();
-                    out += "oPos.xy += g_HalfPixelOffset * oPos.w;\n";
+                    out += "oPos = pdzHostPosition(oPos);\n";
                 }
                 indent();
                 out += pdz.simpleControlFlow ? "return;\n" : "break;\n";
