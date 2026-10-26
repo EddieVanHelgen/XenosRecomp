@@ -948,6 +948,8 @@ void ShaderRecompiler::recompile(const AluInstruction& instr)
                     pdz.scalarHelpers |= PDZ_HELPER_LOGC;
                     print("pdzLogC({})", op(SCALAR_0));
                 }
+                else if (pdzClampLogRcp)
+                    print("clamp(log2({}), FLT_MIN, FLT_MAX)", op(SCALAR_0));
                 else
                     print("log2({})", op(SCALAR_0));
             }
@@ -972,6 +974,8 @@ void ShaderRecompiler::recompile(const AluInstruction& instr)
                     pdz.scalarHelpers |= PDZ_HELPER_RCPF;
                     print("pdzRcpF({})", op(SCALAR_0));
                 }
+                else if (pdzClampLogRcp)
+                    print("clamp(rcp({}), FLT_MIN, FLT_MAX)", op(SCALAR_0));
                 else
                     print("rcp({})", op(SCALAR_0));
             }
@@ -995,6 +999,8 @@ void ShaderRecompiler::recompile(const AluInstruction& instr)
                     pdz.scalarHelpers |= PDZ_HELPER_RSQF;
                     print("pdzRsqF({})", op(SCALAR_0));
                 }
+                else if (pdzClampLogRcp)
+                    print("clamp(rsqrt({}), FLT_MIN, FLT_MAX)", op(SCALAR_0));
                 else
                     print("rsqrt({})", op(SCALAR_0));
             }

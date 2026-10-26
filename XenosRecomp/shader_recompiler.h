@@ -124,6 +124,10 @@ struct ShaderRecompiler : StringBuffer
 
     // pdz branch
     bool pdzMode = false;
+    // pdz: XENOSRECOMP_PDZ_CLAMP_LOG_RCP=1 keeps the old +-FLT_MAX clamp on the unclamped log / rcp / rsq.  The SDK
+    // leaves them unclamped but multiplies with the SM3 rule (0 * anything = 0, ORACLE_DIFF 4.1), which this
+    // translator does not, so 0 * log2(0) is NaN here where the hardware gives 0 (pow(0, 0) via exp/log).
+    bool pdzClampLogRcp = false;
     PdzState pdz;
     std::string pdzJson;
 

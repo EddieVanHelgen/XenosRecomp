@@ -505,6 +505,10 @@ uint32_t ShaderRecompiler::pdzSamplerVariant(const TextureFetchInstruction& inst
 void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string_view& include)
 {
     pdzMode = true;
+    {
+        const char* clamp = std::getenv("XENOSRECOMP_PDZ_CLAMP_LOG_RCP");
+        pdzClampLogRcp = clamp != nullptr && clamp[0] == '1';
+    }
     isPixelShader = shader.isPixelShader;
 
     for (auto& lit : shader.literals)
@@ -1361,6 +1365,8 @@ void ShaderRecompiler::pdzBuildJson(const pdz::Shader& shader)
     j += fmt::format("  \"source\": \"{}\",\n", shader.fromContainer ? "container" : "raw");
     j += fmt::format("  \"ucode_dwords\": {},\n", shader.ucodeDwords);
     j += fmt::format("  \"simple_control_flow\": {},\n", pdz.simpleControlFlow ? "true" : "false");
+    if (pdzClampLogRcp)
+        j += "  \"clamp_log_rcp\": true,\n"; // XENOSRECOMP_PDZ_CLAMP_LOG_RCP=1 (absent = SDK conventions)
 
     auto listU = [](const std::set<uint32_t>& s)
     {
