@@ -940,19 +940,66 @@ void ShaderRecompiler::recompile(const AluInstruction& instr)
 
         case AluScalarOpcode::Logc:
         case AluScalarOpcode::Log:
-            print("clamp(log2({}), FLT_MIN, FLT_MAX)", op(SCALAR_0));
+            if (pdzMode)
+            {
+                // SDK dxbc_translator_alu.cpp: logc maps -inf to -FLT_MAX, log is unclamped
+                if (instr.scalarOpcode == AluScalarOpcode::Logc)
+                {
+                    pdz.scalarHelpers |= PDZ_HELPER_LOGC;
+                    print("pdzLogC({})", op(SCALAR_0));
+                }
+                else
+                    print("log2({})", op(SCALAR_0));
+            }
+            else
+                print("clamp(log2({}), FLT_MIN, FLT_MAX)", op(SCALAR_0));
             break;
 
         case AluScalarOpcode::Rcpc:
         case AluScalarOpcode::Rcpf:
         case AluScalarOpcode::Rcp:
-            print("clamp(rcp({}), FLT_MIN, FLT_MAX)", op(SCALAR_0));
+            if (pdzMode)
+            {
+                // SDK dxbc_translator_alu.cpp: rcpc clamps +-inf to +-FLT_MAX, rcpf flushes +-inf to +-0,
+                // rcp is unclamped
+                if (instr.scalarOpcode == AluScalarOpcode::Rcpc)
+                {
+                    pdz.scalarHelpers |= PDZ_HELPER_RCPC;
+                    print("pdzRcpC({})", op(SCALAR_0));
+                }
+                else if (instr.scalarOpcode == AluScalarOpcode::Rcpf)
+                {
+                    pdz.scalarHelpers |= PDZ_HELPER_RCPF;
+                    print("pdzRcpF({})", op(SCALAR_0));
+                }
+                else
+                    print("rcp({})", op(SCALAR_0));
+            }
+            else
+                print("clamp(rcp({}), FLT_MIN, FLT_MAX)", op(SCALAR_0));
             break;
 
         case AluScalarOpcode::Rsqc:
         case AluScalarOpcode::Rsqf:
         case AluScalarOpcode::Rsq:
-            print("clamp(rsqrt({}), FLT_MIN, FLT_MAX)", op(SCALAR_0));
+            if (pdzMode)
+            {
+                // same conventions as rcpc / rcpf / rcp
+                if (instr.scalarOpcode == AluScalarOpcode::Rsqc)
+                {
+                    pdz.scalarHelpers |= PDZ_HELPER_RSQC;
+                    print("pdzRsqC({})", op(SCALAR_0));
+                }
+                else if (instr.scalarOpcode == AluScalarOpcode::Rsqf)
+                {
+                    pdz.scalarHelpers |= PDZ_HELPER_RSQF;
+                    print("pdzRsqF({})", op(SCALAR_0));
+                }
+                else
+                    print("rsqrt({})", op(SCALAR_0));
+            }
+            else
+                print("clamp(rsqrt({}), FLT_MIN, FLT_MAX)", op(SCALAR_0));
             break;
 
         case AluScalarOpcode::Subs:

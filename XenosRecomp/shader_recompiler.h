@@ -35,6 +35,17 @@ struct PdzLoopSite
     bool predicatedBreak;
 };
 
+// pdz: per-shader helper functions emitted only when an instruction uses them (shader_common_pdz.hlsli stays
+// identical across shaders)
+enum : uint32_t
+{
+    PDZ_HELPER_RCPF = 1u << 0,
+    PDZ_HELPER_RCPC = 1u << 1,
+    PDZ_HELPER_RSQF = 1u << 2,
+    PDZ_HELPER_RSQC = 1u << 3,
+    PDZ_HELPER_LOGC = 1u << 4,
+};
+
 struct PdzState
 {
     bool simpleControlFlow = true;
@@ -47,6 +58,7 @@ struct PdzState
     bool writesPointSize = false;
     bool vertexTextureFetch = false;
     bool usesRegisterLod = false;
+    uint32_t scalarHelpers = 0; // PDZ_HELPER_*
     uint32_t cfBytes = 0;
     uint32_t colorOutputs = 0;
     uint32_t interpolatorsWritten = 0;

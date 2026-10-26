@@ -1118,6 +1118,24 @@ void ShaderRecompiler::recompilePdz(const pdz::Shader& shader, const std::string
                 FILTERS[v.magFilter & 3], FILTERS[v.minFilter & 3], FILTERS[v.mipFilter & 3], ANISO[v.anisoFilter & 7],
                 FILTERS[v.volMagFilter & 3], FILTERS[v.volMinFilter & 3], pdzSamplerCode(v));
         }
+        // Scalar reciprocal / log helpers, only the ones this shader uses (SDK dxbc_translator_alu.cpp):
+        // rcpf / rsqf flush an infinite result to 0 keeping its sign, rcpc / rsqc turn it into +-FLT_MAX,
+        // logc turns -inf into -FLT_MAX; rcp / rsq / log stay unclamped (emitted inline).
+        if (pdz.scalarHelpers != 0)
+        {
+            std::string helpers;
+            if (pdz.scalarHelpers & PDZ_HELPER_RCPF)
+                helpers += "float pdzRcpF(float x) { float r = rcp(x); return isinf(r) ? asfloat(asuint(r) & 0x80000000u) : r; }\n";
+            if (pdz.scalarHelpers & PDZ_HELPER_RCPC)
+                helpers += "float pdzRcpC(float x) { float r = rcp(x); return isinf(r) ? asfloat(asuint(r) - 1u) : r; }\n";
+            if (pdz.scalarHelpers & PDZ_HELPER_RSQF)
+                helpers += "float pdzRsqF(float x) { float r = rsqrt(x); return isinf(r) ? asfloat(asuint(r) & 0x80000000u) : r; }\n";
+            if (pdz.scalarHelpers & PDZ_HELPER_RSQC)
+                helpers += "float pdzRsqC(float x) { float r = rsqrt(x); return isinf(r) ? asfloat(asuint(r) - 1u) : r; }\n";
+            if (pdz.scalarHelpers & PDZ_HELPER_LOGC)
+                helpers += "float pdzLogC(float x) { float r = log2(x); return (isinf(r) && r < 0.0) ? asfloat(0xFF7FFFFFu) : r; }\n";
+            table = helpers + "\n" + table;
+        }
         out.insert(samplerTablePos, table);
     }
 
